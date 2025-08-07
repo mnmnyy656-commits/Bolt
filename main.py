@@ -9,9 +9,9 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler,
     CallbackContext, MessageHandler, Filters
 )
-from config import BOT_TOKEN  # ضع التوكن في ملف config.py
+from config import BOT_TOKEN
 
-# --- Flask ويب سيرفر بسيط ليبقي البوت شغال ---
+# --- Flask server to keep bot alive ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -21,7 +21,7 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
 
-# --- بيانات البوت ---
+# --- Load/Save Data ---
 DATA_FILE = "database.json"
 
 def load_data():
@@ -42,7 +42,7 @@ data = load_data()
 user_states = {}
 temp_info = {}
 
-# --- بداية البوت ---
+# --- /start ---
 def start(update: Update, context: CallbackContext):
     keyboard = [
         [InlineKeyboardButton("🎰 إنشاء روليت", callback_data="create_roulette")],
@@ -53,20 +53,21 @@ def start(update: Update, context: CallbackContext):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# --- تعامل مع خيارات الربط والقنوات ---
+# --- ربط قناة ---
 def handle_link_channel(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
-    query.message.reply_text("📢 أرسل معرف القناة (مثلاً: @mychannel أو -100...)")
+    query.message.reply_text("📢 أرسل معرف القناة (مثلاً: @mychannel)")
     user_states[query.from_user.id] = "awaiting_link_channel"
 
+# --- إنشاء روليت ---
 def create_roulette(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     user_states[query.from_user.id] = "awaiting_channel_forward"
-    query.message.edit_text("📢 أرسل رسالة معاد توجيهها (Forward) من القناة التي تريد النشر فيها.")
+    query.message.edit_text("📢 أرسل رسالة معاد توجيهها من القناة التي تريد النشر فيها.")
 
-# --- معالجة الرسائل حسب حالة المستخدم ---
+# --- استقبال الرسائل حسب الحالة ---
 def handle_message(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     text = update.message.text.strip() if update.message.text else ""
@@ -108,29 +109,42 @@ def handle_message(update: Update, context: CallbackContext):
             update.message.reply_text("❗️ الرجاء إرسال رقم صحيح للفائزين.")
             return
         temp_info[user_id]["winners_count"] = int(text)
-        user_states[user_id] = "awaiting_text"
-        update.message.reply_text("📝 أرسل نص السحب:")
-
-    elif state == "awaiting_text":
-        temp_info[user_id]["text"] = text
         user_states[user_id] = "awaiting_force_join"
-        update.message.reply_text("📌 هل تريد تفعيل الاشتراك الإجباري في قناة؟ (نعم / لا)")
 
-    elif state == "awaiting_force_join":
-        if text.lower() == "نعم":
-            user_states[user_id] = "awaiting_force_channel"
-            update.message.reply_text("📢 أرسل معرف قناة الاشتراك الإجباري (مثلاً: @mychannel)")
-        else:
-            info = temp_info.pop(user_id)
-            info["force_channel"] = None
-            post_roulette(update, context, user_id, info)
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ نعم", callback_data="force_yes"),
+                InlineKeyboardButton("❌ لا", callback_data="force_no")
+            ]
+        ]
+        update.message.reply_text("📌 هل تريد تفعيل الاشتراك الإجباري؟", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif state == "awaiting_force_channel":
         info = temp_info.pop(user_id)
         info["force_channel"] = text
         post_roulette(update, context, user_id, info)
 
-# --- نشر السحب في القناة ---
+    elif state == "awaiting_text":
+        temp_info[user_id]["text"] = text
+        user_states[user_id] = "awaiting_force_join"
+        update.message.reply_text("📌 هل تريد تفعيل الاشتراك الإجباري؟ (نعم / لا)")
+
+# --- أزرار نعم / لا للاشتراك الإجباري ---
+def handle_force_choice(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    user_id = query.from_user.id
+    choice = query.data
+
+    if choice == "force_yes":
+        user_states[user_id] = "awaiting_force_channel"
+        context.bot.send_message(user_id, "📢 أرسل معرف قناة الاشتراك الإجباري (مثلاً: @mychannel)")
+    else:
+        info = temp_info.pop(user_id)
+        info["force_channel"] = None
+        post_roulette(query, context, user_id, info)
+
+# --- نشر السحب ---
 def post_roulette(update, context, user_id, info):
     channel = info["channel"]
     winners_count = info["winners_count"]
@@ -169,7 +183,6 @@ def post_roulette(update, context, user_id, info):
         data[str(user_id)]["message_id"] = sent_msg.message_id
         save_data(data)
         context.bot.send_message(chat_id=user_id, text="✅ تم نشر السحب في القناة.")
-
     except Exception as e:
         context.bot.send_message(chat_id=user_id, text=f"❌ خطأ في نشر السحب:\n{e}")
 
@@ -204,7 +217,7 @@ def join_roulette(update: Update, context: CallbackContext):
     save_data(data)
     query.answer("✅ تم انضمامك للسحب!")
 
-    # تحديث عدد المشاركين في رسالة القناة
+    # تحديث عدد المشاركين
     try:
         channel = roulette["channel"]
         message_id = roulette["message_id"]
@@ -225,8 +238,44 @@ def join_roulette(update: Update, context: CallbackContext):
             text=f"🎰 سحب جديد:\n\n{display_text}\n\n👥 عدد المشاركين: {participants_count}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+        # إرسال اسم المشارك لمالك السحب مع زرين
+        context.bot.send_message(
+            chat_id=owner_id,
+            text=f"👤 <a href='tg://user?id={user_id}'>مشارك جديد</a>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ اختيار كفائز", callback_data=f"manualwin_{owner_id}_{user_id}"),
+                    InlineKeyboardButton("❌ استبعاد", callback_data=f"exclude_{owner_id}_{user_id}")
+                ]
+            ])
+        )
+
     except Exception as e:
         print("خطأ تحديث رسالة القناة:", e)
+
+# --- استبعاد يدوي ---
+def exclude_user(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    _, owner_id, target_id = query.data.split("_")
+    roulette = data.get(owner_id)
+    if roulette and int(target_id) in roulette["participants"]:
+        roulette["participants"].remove(int(target_id))
+        save_data(data)
+        query.edit_message_text("❌ تم استبعاد المستخدم.")
+    else:
+        query.edit_message_text("❌ لا يمكن استبعاده.")
+
+# --- فوز يدوي ---
+def manual_win(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    _, owner_id, target_id = query.data.split("_")
+    user = context.bot.get_chat(int(target_id))
+    context.bot.send_message(chat_id=owner_id, text=f"🏆 <a href='tg://user?id={user.id}'>{user.full_name}</a> فاز!", parse_mode="HTML")
+    context.bot.send_message(chat_id=user.id, text="🎉 مبروك! ربحت بالسحب!")
 
 # --- إيقاف السحب ---
 def stop_roulette(update: Update, context: CallbackContext):
@@ -235,22 +284,19 @@ def stop_roulette(update: Update, context: CallbackContext):
     owner_id = query.data.split("_")[1]
     sender_id = query.from_user.id
     roulette = data.get(owner_id)
-
     if not roulette or str(sender_id) != owner_id:
         query.answer("❌ أنت غير مخول لإيقاف السحب.", show_alert=True)
         return
-
     roulette["active"] = False
     save_data(data)
     query.message.edit_text("🚫 تم إيقاف السحب.")
 
-# --- اختيار الفائزين عشوائياً ---
+# --- اختيار فائزين عشوائيًا ---
 def draw_winners(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     owner_id = query.data.split("_")[1]
     roulette = data.get(owner_id)
-
     if not roulette:
         query.answer("❌ السحب غير موجود.")
         return
@@ -269,28 +315,34 @@ def draw_winners(update: Update, context: CallbackContext):
     for uid in winners:
         try:
             user = context.bot.get_chat(uid)
-            msg += f"🏆 {user.full_name}\n"
+            msg += f"🏆 <a href='tg://user?id={uid}'>{user.full_name}</a>\n"
             context.bot.send_message(chat_id=uid, text="🎉 مبروك! ربحت بالسحب!")
         except:
             msg += f"🏆 ID: {uid}\n"
 
-    query.message.edit_text(msg)
+    query.message.edit_text(msg, parse_mode="HTML")
 
-# --- معالج الكل ---
+# --- التعامل مع كل الأزرار ---
 def button_handler(update: Update, context: CallbackContext):
     data_cb = update.callback_query.data
-
     if data_cb == "create_roulette":
         create_roulette(update, context)
     elif data_cb == "link_channel":
         handle_link_channel(update, context)
+    elif data_cb == "force_yes" or data_cb == "force_no":
+        handle_force_choice(update, context)
     elif data_cb.startswith("join_"):
         join_roulette(update, context)
     elif data_cb.startswith("stop_"):
         stop_roulette(update, context)
     elif data_cb.startswith("draw_"):
         draw_winners(update, context)
+    elif data_cb.startswith("exclude_"):
+        exclude_user(update, context)
+    elif data_cb.startswith("manualwin_"):
+        manual_win(update, context)
 
+# --- تشغيل البوت ---
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -300,7 +352,6 @@ def main():
     dp.add_handler(MessageHandler(Filters.text | Filters.forwarded, handle_message))
 
     threading.Thread(target=run_flask).start()
-
     updater.start_polling()
     updater.idle()
 
