@@ -9,7 +9,7 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler,
     CallbackContext, MessageHandler, Filters
 )
-from config import BOT_TOKEN  # ضع التوكن هنا
+from config import BOT_TOKEN
 
 # --- Flask ويب سيرفر ---
 app = Flask(__name__)
@@ -38,6 +38,19 @@ def save_data(data):
 data = load_data()
 user_states = {}
 temp_info = {}
+
+# --- فحص إذا كان المستخدم مشرف في القناة ---
+def is_admin(user_id: int, channel_username: str, context: CallbackContext):
+    try:
+        chat = context.bot.get_chat(channel_username)
+        admins = context.bot.get_chat_administrators(chat.id)
+        for admin in admins:
+            if admin.user.id == user_id:
+                return True
+        return False
+    except Exception as e:
+        print(f"خطأ في التحقق من المشرفين: {e}")
+        return False
 
 # --- /start ---
 def start(update: Update, context: CallbackContext):
@@ -204,7 +217,6 @@ def join_roulette(update: Update, context: CallbackContext):
     save_data(data)
     query.answer("✅ تم انضمامك للسحب!")
 
-    # عرض اسم المشارك للمشرف مع أزرار اختيار أو استبعاد
     try:
         name = f"[{query.from_user.full_name}](tg://user?id={user_id})"
         keyboard = [
@@ -215,7 +227,6 @@ def join_roulette(update: Update, context: CallbackContext):
     except Exception as e:
         print("خطأ في عرض المشارك:", e)
 
-    # تحديث رسالة القناة بعد الانضمام
     try:
         channel = roulette["channel"]
         message_id = roulette["message_id"]
@@ -265,15 +276,22 @@ def manual_win(update: Update, context: CallbackContext):
     except:
         query.answer("❌ خطأ في إرسال رسالة للفائز.")
 
-# --- سحب عشوائي ---
+# --- السحب العشوائي مع عرض قائمة الفائزين مرقمة ---
 def draw_winners(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     owner_id = query.data.split("_")[1]
+    sender_id = query.from_user.id
     roulette = data.get(owner_id)
+
     if not roulette:
         query.answer("❌ السحب غير موجود.")
         return
+    # تحقق صلاحيات: فقط صاحب السحب أو مشرفي القناة
+    if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
+        query.answer("❌ أنت لست مخولاً لهذا الإجراء.", show_alert=True)
+        return
+
     participants = roulette.get("participants", [])
     if not participants:
         query.answer("❗️ لا يوجد مشاركين.")
@@ -284,25 +302,30 @@ def draw_winners(update: Update, context: CallbackContext):
     save_data(data)
 
     msg = "🎉 الفائزون:\n"
-    for uid in winners:
+    for i, uid in enumerate(winners, start=1):
         try:
             user = context.bot.get_chat(uid)
-            msg += f"🏆 [{user.full_name}](tg://user?id={uid})\n"
+            msg += f"{i}. 🏆 [{user.full_name}](tg://user?id={uid})\n"
             context.bot.send_message(chat_id=uid, text="🎉 مبروك! ربحت بالسحب!")
         except:
-            msg += f"🏆 ID: {uid}\n"
+            msg += f"{i}. 🏆 فائز مجهول\n"
+
     query.message.edit_text(msg, parse_mode="Markdown")
 
-# --- إيقاف السحب ---
+# --- إيقاف السحب مع التحقق من الصلاحيات ---
 def stop_roulette(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     owner_id = query.data.split("_")[1]
     sender_id = query.from_user.id
     roulette = data.get(owner_id)
-    if not roulette or str(sender_id) != owner_id:
-        query.answer("❌ غير مخول.", show_alert=True)
+    if not roulette:
+        query.answer("❌ السحب غير موجود.")
         return
+    if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
+        query.answer("❌ أنت لست مخولاً لهذا الإجراء.", show_alert=True)
+        return
+
     roulette["active"] = False
     save_data(data)
     query.message.edit_text("🚫 تم إيقاف السحب.")
