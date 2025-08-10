@@ -155,9 +155,11 @@ def handle_force_channel(update: Update, context: CallbackContext):
             if member.status not in ["administrator", "creator"]:
                 update.message.reply_text("❌ البوت ليس مشرفاً في قناة الاشتراك الإجباري.")
                 return
+            # احفظ القناة في info المؤقتة
             info = temp_info.get(user_id, {})
             info["force_channel"] = text
             temp_info[user_id] = info
+            # انشر السحب
             post_roulette(update, context, user_id, info)
             user_states[user_id] = None
         except Exception as e:
@@ -271,6 +273,7 @@ def join_roulette(update: Update, context: CallbackContext):
 def exclude_participant(update: Update, context: CallbackContext):
     query = update.callback_query
     _, owner_id, target_id = query.data.split("_")
+    # تحقق من الصلاحية: صاحب السحب أو مشرف القناة فقط
     sender_id = query.from_user.id
     roulette = data.get(owner_id)
     if not roulette:
@@ -293,6 +296,7 @@ def manual_win(update: Update, context: CallbackContext):
     if not roulette:
         query.answer("❌ السحب غير موجود.", show_alert=True)
         return
+    # تحقق من الصلاحية: صاحب السحب أو مشرف القناة فقط
     if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
         query.answer("❌ غير مخول.", show_alert=True)
         return
@@ -304,7 +308,7 @@ def manual_win(update: Update, context: CallbackContext):
     except:
         query.answer("❌ خطأ في إرسال رسالة للفائز.")
 
-# --- السحب العشوائي مع اختيار عدد فائزين عشوائيين ---
+# --- السحب العشوائي مع التحقق من عدد المشاركين ---
 def draw_winners(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
@@ -315,17 +319,19 @@ def draw_winners(update: Update, context: CallbackContext):
     if not roulette:
         query.answer("❌ السحب غير موجود.")
         return
+    # تحقق صلاحيات: فقط صاحب السحب أو مشرفي القناة
     if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
         query.answer("❌ أنت لست مخولاً لهذا الإجراء.", show_alert=True)
         return
 
     participants = roulette.get("participants", [])
-    if not participants:
-        query.answer("❗️ لا يوجد مشاركين.")
+    winners_count = roulette["winners_count"]
+
+    if len(participants) < winners_count:
+        query.answer(f"❗️ عدد المشاركين ({len(participants)}) أقل من عدد الفائزين المطلوب ({winners_count}). لا يمكن إجراء السحب.", show_alert=True)
         return
 
-    winners_count = roulette["winners_count"]
-    winners = random.sample(participants, min(len(participants), winners_count))
+    winners = random.sample(participants, winners_count)
     roulette["active"] = False
     save_data(data)
 
@@ -340,7 +346,7 @@ def draw_winners(update: Update, context: CallbackContext):
 
     query.message.edit_text(msg, parse_mode="Markdown")
 
-# --- إيقاف السحب ---
+# --- إيقاف السحب مع التحقق من الصلاحيات ---
 def stop_roulette(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
