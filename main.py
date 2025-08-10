@@ -329,6 +329,7 @@ def draw_winners(update: Update, context: CallbackContext):
         query.answer("❗️ لا يوجد مشاركين.")
         return
     winners_count = roulette["winners_count"]
+    # اختيار عشوائي للفائزين:
     winners = random.sample(participants, min(len(participants), winners_count))
     roulette["active"] = False
     save_data(data)
