@@ -144,6 +144,27 @@ def force_join_choice(update: Update, context: CallbackContext):
         context.bot.send_message(chat_id=user_id, text="✅ سيتم نشر السحب بدون اشتراك إجباري.")
         post_roulette(update, context, user_id, info)
 
+# --- استقبال معرف قناة الاشتراك الإجباري ---
+def handle_force_channel(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    text = update.message.text.strip() if update.message.text else ""
+    if user_states.get(user_id) == "awaiting_force_channel":
+        try:
+            chat = context.bot.get_chat(text)
+            member = context.bot.get_chat_member(chat.id, context.bot.id)
+            if member.status not in ["administrator", "creator"]:
+                update.message.reply_text("❌ البوت ليس مشرفاً في قناة الاشتراك الإجباري.")
+                return
+            # احفظ القناة في info المؤقتة
+            info = temp_info.get(user_id, {})
+            info["force_channel"] = text
+            temp_info[user_id] = info
+            # انشر السحب
+            post_roulette(update, context, user_id, info)
+            user_states[user_id] = None
+        except Exception as e:
+            update.message.reply_text(f"❌ خطأ:\n{e}")
+
 # --- نشر السحب في القناة ---
 def post_roulette(update, context, user_id, info):
     channel = info["channel"]
@@ -252,10 +273,15 @@ def join_roulette(update: Update, context: CallbackContext):
 def exclude_participant(update: Update, context: CallbackContext):
     query = update.callback_query
     _, owner_id, target_id = query.data.split("_")
-    if str(query.from_user.id) != owner_id:
-        query.answer("❌ غير مصرح.", show_alert=True)
-        return
+    # تحقق من الصلاحية: صاحب السحب أو مشرف القناة فقط
+    sender_id = query.from_user.id
     roulette = data.get(owner_id)
+    if not roulette:
+        query.answer("❌ السحب غير موجود.", show_alert=True)
+        return
+    if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
+        query.answer("❌ غير مخول.", show_alert=True)
+        return
     if roulette and int(target_id) in roulette["participants"]:
         roulette["participants"].remove(int(target_id))
         save_data(data)
@@ -265,8 +291,14 @@ def exclude_participant(update: Update, context: CallbackContext):
 def manual_win(update: Update, context: CallbackContext):
     query = update.callback_query
     _, owner_id, winner_id = query.data.split("_")
-    if str(query.from_user.id) != owner_id:
-        query.answer("❌ غير مصرح.", show_alert=True)
+    sender_id = query.from_user.id
+    roulette = data.get(owner_id)
+    if not roulette:
+        query.answer("❌ السحب غير موجود.", show_alert=True)
+        return
+    # تحقق من الصلاحية: صاحب السحب أو مشرف القناة فقط
+    if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
+        query.answer("❌ غير مخول.", show_alert=True)
         return
     try:
         user = context.bot.get_chat(int(winner_id))
@@ -350,13 +382,21 @@ def button_handler(update: Update, context: CallbackContext):
     elif data_cb.startswith("manualwin_"):
         manual_win(update, context)
 
+# --- إضافة معالج خاص لاستقبال معرف قناة الاشتراك الإجباري ---
+def message_handler(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if user_states.get(user_id) == "awaiting_force_channel":
+        handle_force_channel(update, context)
+    else:
+        handle_message(update, context)
+
 # --- تشغيل البوت ---
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CallbackQueryHandler(button_handler))
-    dp.add_handler(MessageHandler(Filters.text | Filters.forwarded, handle_message))
+    dp.add_handler(MessageHandler(Filters.text | Filters.forwarded, message_handler))
     threading.Thread(target=run_flask).start()
     updater.start_polling()
     updater.idle()
