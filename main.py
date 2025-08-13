@@ -155,27 +155,30 @@ def handle_force_channel(update: Update, context: CallbackContext):
             if member.status not in ["administrator", "creator"]:
                 update.message.reply_text("❌ البوت ليس مشرفاً في قناة الاشتراك الإجباري.")
                 return
+            # احفظ القناة في info المؤقتة
             info = temp_info.get(user_id, {})
             info["force_channel"] = text
             temp_info[user_id] = info
+            # انشر السحب
             post_roulette(update, context, user_id, info)
             user_states[user_id] = None
         except Exception as e:
             update.message.reply_text(f"❌ خطأ:\n{e}")
 
-# --- نشر السحب في القناة ---
+# --- نشر السحب في القناة مع رابط مضغوط ---
 def post_roulette(update, context, user_id, info):
     channel = info["channel"]
     winners_count = info["winners_count"]
-    message_text = info["text"]
+    display_text = info["text"]
     force_channel = info.get("force_channel")
 
+    # حفظ بيانات السحب
     data[str(user_id)] = {
         "participants": [],
         "active": True,
         "winners_count": winners_count,
         "channel": channel,
-        "text": message_text,
+        "text": display_text,
         "force_channel": force_channel,
         "message_id": None
     }
@@ -183,23 +186,27 @@ def post_roulette(update, context, user_id, info):
     user_states[user_id] = None
 
     try:
-        display_text = message_text
+        # نص السحب مع رابط مضغوط للبوت
+        text = f"[🎰 روليت Batman🦇](https://t.me/Replit_Batman_bot)\n\n{display_text}\n\n👥 عدد المشاركين: 0"
         if force_channel:
-            display_text += f"\n\n📌 للاشتراك الإجباري: https://t.me/{force_channel.lstrip('@')}"
+            text += f"\n\n📌 للاشتراك الإجباري: https://t.me/{force_channel.lstrip('@')}"
 
+        # أزرار المشاركة والإيقاف والسحب
         keyboard = [
             [InlineKeyboardButton("🎯 شارك", callback_data=f"join_{user_id}")],
             [InlineKeyboardButton("🚫 إيقاف", callback_data=f"stop_{user_id}"),
              InlineKeyboardButton("🎉 سحب", callback_data=f"draw_{user_id}")]
         ]
 
-        # النص المعدل حسب طلبك
+        # إرسال الرسالة للقناة
         sent_msg = context.bot.send_message(
             chat_id=channel,
-            text=f"[🎰 روليت Batman🦇](https://t.me/Replit_Batman_bot)\n\n{display_text}\n\n👥 عدد المشاركين: 0",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
         )
 
+        # حفظ رقم الرسالة
         data[str(user_id)]["message_id"] = sent_msg.message_id
         save_data(data)
         context.bot.send_message(chat_id=user_id, text="✅ تم نشر السحب في القناة.")
@@ -263,7 +270,8 @@ def join_roulette(update: Update, context: CallbackContext):
             chat_id=channel,
             message_id=message_id,
             text=f"[🎰 روليت Batman🦇](https://t.me/Replit_Batman_bot)\n\n{display_text}\n\n👥 عدد المشاركين: {participants_count}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
         )
     except Exception as e:
         print("خطأ تحديث رسالة القناة:", e)
@@ -380,7 +388,7 @@ def button_handler(update: Update, context: CallbackContext):
     elif data_cb.startswith("manualwin_"):
         manual_win(update, context)
 
-# --- معالج الرسائل ---
+# --- معالجة الرسائل ---
 def message_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if user_states.get(user_id) == "awaiting_force_channel":
