@@ -163,7 +163,7 @@ def handle_force_channel(update: Update, context: CallbackContext):
         except Exception as e:
             update.message.reply_text(f"❌ خطأ:\n{e}")
 
-# --- نشر السحب في القناة (مع تعديل كلمة روليت مع رابط البوت) ---
+# --- نشر السحب في القناة ---
 def post_roulette(update, context, user_id, info):
     channel = info["channel"]
     winners_count = info["winners_count"]
@@ -177,8 +177,7 @@ def post_roulette(update, context, user_id, info):
         "channel": channel,
         "text": message_text,
         "force_channel": force_channel,
-        "message_id": None,
-        "manual_winners": []
+        "message_id": None
     }
     save_data(data)
     user_states[user_id] = None
@@ -188,18 +187,17 @@ def post_roulette(update, context, user_id, info):
         if force_channel:
             display_text += f"\n\n📌 للاشتراك الإجباري: https://t.me/{force_channel.lstrip('@')}"
 
-        header = "[🎰 رولیت Batman🦇](https://t.me/Replit_Batman_bot)"
         keyboard = [
             [InlineKeyboardButton("🎯 شارك", callback_data=f"join_{user_id}")],
             [InlineKeyboardButton("🚫 إيقاف", callback_data=f"stop_{user_id}"),
              InlineKeyboardButton("🎉 سحب", callback_data=f"draw_{user_id}")]
         ]
 
+        # النص المعدل حسب طلبك
         sent_msg = context.bot.send_message(
             chat_id=channel,
-            text=f"{header}\n\n{display_text}\n\n👥 عدد المشاركين: 0",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
+            text=f"[🎰 روليت Batman🦇](https://t.me/Replit_Batman_bot)\n\n{display_text}\n\n👥 عدد المشاركين: 0",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
         data[str(user_id)]["message_id"] = sent_msg.message_id
@@ -239,7 +237,6 @@ def join_roulette(update: Update, context: CallbackContext):
     save_data(data)
     query.answer("✅ تم انضمامك للسحب!")
 
-    # إرسال رسالة لصاحب السحب مع أزرار اختيار الفائز أو استبعاد
     try:
         name = f"[{query.from_user.full_name}](tg://user?id={user_id})"
         keyboard = [
@@ -250,7 +247,6 @@ def join_roulette(update: Update, context: CallbackContext):
     except Exception as e:
         print("خطأ في عرض المشارك:", e)
 
-    # تحديث رسالة السحب في القناة بعدد المشاركين
     try:
         channel = roulette["channel"]
         message_id = roulette["message_id"]
@@ -258,8 +254,6 @@ def join_roulette(update: Update, context: CallbackContext):
         display_text = roulette["text"]
         if force_channel:
             display_text += f"\n\n📌 للاشتراك الإجباري: https://t.me/{force_channel.lstrip('@')}"
-
-        header = "[🎰 رولیت Batman🦇](https://t.me/Replit_Batman_bot)"
         keyboard = [
             [InlineKeyboardButton("🎯 شارك", callback_data=f"join_{owner_id}")],
             [InlineKeyboardButton("🚫 إيقاف", callback_data=f"stop_{owner_id}"),
@@ -268,9 +262,8 @@ def join_roulette(update: Update, context: CallbackContext):
         context.bot.edit_message_text(
             chat_id=channel,
             message_id=message_id,
-            text=f"{header}\n\n{display_text}\n\n👥 عدد المشاركين: {participants_count}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
+            text=f"[🎰 روليت Batman🦇](https://t.me/Replit_Batman_bot)\n\n{display_text}\n\n👥 عدد المشاركين: {participants_count}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
     except Exception as e:
         print("خطأ تحديث رسالة القناة:", e)
@@ -301,63 +294,18 @@ def manual_win(update: Update, context: CallbackContext):
     if not roulette:
         query.answer("❌ السحب غير موجود.", show_alert=True)
         return
-    # تحقق من الصلاحية: صاحب السحب أو مشرف القناة فقط
     if str(sender_id) != owner_id and not is_admin(sender_id, roulette["channel"], context):
         query.answer("❌ غير مخول.", show_alert=True)
         return
-
-    if "manual_winners" not in roulette:
-        roulette["manual_winners"] = []
-
-    winner_id_int = int(winner_id)
-    if winner_id_int in roulette["manual_winners"]:
-        query.answer("❗️ تم اختيار هذا الفائز مسبقاً.", show_alert=True)
-        return
-
-    roulette["manual_winners"].append(winner_id_int)
-    save_data(data)
-
     try:
-        user = context.bot.get_chat(winner_id_int)
-        name = f"[{user.full_name}](tg://user?id={winner_id_int})"
-        context.bot.send_message(chat_id=owner_id, text=f"🏆 تم اختيار الفائز: {name}", parse_mode="Markdown")
-        context.bot.send_message(chat_id=winner_id_int, text="🎉 مبروك! تم اختيارك كفائز!")
+        user = context.bot.get_chat(int(winner_id))
+        name = f"[{user.full_name}](tg://user?id={user.id})"
+        context.bot.send_message(chat_id=owner_id, text=f"🏆 الفائز: {name}", parse_mode="Markdown")
+        context.bot.send_message(chat_id=user.id, text="🎉 مبروك! تم اختيارك كفائز!")
     except:
         query.answer("❌ خطأ في إرسال رسالة للفائز.")
 
-    # تحقق من اكتمال عدد الفائزين المختارين يدويًا
-    if len(roulette["manual_winners"]) >= roulette["winners_count"]:
-        roulette["active"] = False
-        save_data(data)
-
-        msg = "🎉 الفائزون:\n"
-        for i, uid in enumerate(roulette["manual_winners"], start=1):
-            try:
-                user = context.bot.get_chat(uid)
-                msg += f"{i}. 🏆 [{user.full_name}](tg://user?id={uid})\n"
-            except:
-                msg += f"{i}. 🏆 فائز مجهول\n"
-
-        # نشر رسالة الفائزين في القناة
-        try:
-            context.bot.send_message(chat_id=roulette["channel"], text=msg, parse_mode="Markdown")
-        except Exception as e:
-            print("خطأ في إرسال رسالة الفائزين في القناة:", e)
-
-        # تحديث رسالة السحب في القناة لاظهار انها انتهت
-        try:
-            header = "[🎰 رولیت Batman🦇](https://t.me/Replit_Batman_bot)"
-            finished_text = f"{header}\n\n{roulette['text']}\n\n✅ تم اختيار جميع الفائزين."
-            context.bot.edit_message_text(
-                chat_id=roulette["channel"],
-                message_id=roulette["message_id"],
-                text=finished_text,
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            print("خطأ تحديث رسالة القناة بعد الانتهاء:", e)
-
-# --- السحب العشوائي مع التحقق من عدد المشاركين ---
+# --- السحب العشوائي ---
 def draw_winners(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
@@ -419,4 +367,37 @@ def button_handler(update: Update, context: CallbackContext):
         create_roulette(update, context)
     elif data_cb == "link_channel":
         handle_link_channel(update, context)
-    elif data_cb == "force_yes"
+    elif data_cb in ["force_yes", "force_no"]:
+        force_join_choice(update, context)
+    elif data_cb.startswith("join_"):
+        join_roulette(update, context)
+    elif data_cb.startswith("stop_"):
+        stop_roulette(update, context)
+    elif data_cb.startswith("draw_"):
+        draw_winners(update, context)
+    elif data_cb.startswith("exclude_"):
+        exclude_participant(update, context)
+    elif data_cb.startswith("manualwin_"):
+        manual_win(update, context)
+
+# --- معالج الرسائل ---
+def message_handler(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if user_states.get(user_id) == "awaiting_force_channel":
+        handle_force_channel(update, context)
+    else:
+        handle_message(update, context)
+
+# --- تشغيل البوت ---
+def main():
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    dp.add_handler(MessageHandler(Filters.text | Filters.forwarded, message_handler))
+    threading.Thread(target=run_flask).start()
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
