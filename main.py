@@ -372,10 +372,10 @@ def draw_winners(update: Update, context: CallbackContext):
     participants = r.get("participants", [])
     manual_selected = r.get("manual_selected", [])
 
-    # تحديد مجموعة السحب
+    # مجموعة السحب الصحيحة
     source_pool = manual_selected if manual_selected else participants
 
-    # تحقق من وجود عدد كافي
+    # تحقق من العدد
     if len(source_pool) < winners_count:
         q.answer(f"❗️ عدد المشاركين ({len(source_pool)}) أقل من عدد الفائزين المطلوب ({winners_count}).", show_alert=True)
         return
@@ -387,9 +387,12 @@ def draw_winners(update: Update, context: CallbackContext):
 
     msg = "🎉 الفائزون:\n"
     for i, uid in enumerate(winners, start=1):
-        user = context.bot.get_chat(uid)
-        msg += f"{i}. 🏆 [{user.full_name}](tg://user?id={uid})\n"
-        context.bot.send_message(chat_id=uid, text="🎉 مبروك! ربحت بالسحب!")
+        try:
+            user = context.bot.get_chat(uid)
+            msg += f"{i}. 🏆 [{user.full_name}](tg://user?id={uid})\n"
+            context.bot.send_message(chat_id=uid, text="🎉 مبروك! ربحت بالسحب!")
+        except Exception as e:
+            msg += f"{i}. 🏆 مستخدم غير معروف\n"
 
     q.message.edit_text(msg, parse_mode="Markdown")
 
